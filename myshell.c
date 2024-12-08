@@ -10,6 +10,66 @@
 
 #define READ_END 0
 #define WRITE_END 1
+#define MAX_JOBS 10
+
+// Estructura para salida de jobs
+typedef struct {
+    pid_t pid;
+    char *nombre;
+    int estado; // 0: no iniciado, 1: ejecutando, 2: terminado
+} tjob;
+
+tjob jobs[MAX_JOBS];
+int numJobs = 0;
+
+//funcion para cd
+
+void cd_comando(char *path) {
+	if (path == NULL) {
+		path = getenv("HOME");
+		if (chdir(path) != 0) {
+            fprintf(stderr, "Error al cambiar al directorio HOME: %s\n", strerror(errno));
+        }
+	}
+	else {
+		if (chdir(path) != 0) {
+            fprintf(stderr, "Error al cambiar al directorio '%s': %s\n", path, strerror(errno));
+		}
+	}
+}
+
+//funcion para jobs
+void jobs_comando() {
+	if (numJobs == 0) {
+		printf("No hay trabajos en segundo plano\n");
+		return;
+	}
+	for (int i = 0; i < numJobs; i++) {
+        printf("[%d] %d %s %s\n", i + 1, jobs[i].pid, (jobs[i].estado == 2 ? "terminado" : "ejecutando"), jobs[i].nombre);	
+	}
+}
+
+//funcion fg
+void fg_comando(int job) {
+	if (job < 1 || job > numJobs) {
+		fprintf(stderr, "Error: el trabajo especificado no existe\n");
+		return;
+	}
+	pid_t pid = jobs[job - 1].pid;
+
+	if(waitpid(pid, NULL, 0) == -1) {
+		fprintf(stderr, "Error al esperar al trabajo en primer plano: %s\n", strerror(errno));
+	} else {
+        printf("Proceso %d terminado.\n", pid);
+	}
+
+    // Eliminar el trabajo de la lista
+	for (int i = job - 1; i < numJobs - 1; i++) {
+		jobs[i] = jobs[i + 1];
+	}
+	numJobs--;
+}
+
 
 void redirigir_archivo(char *archivo, int tipo) {
 	//Descriptor de fichero para interactuar con el archivo
@@ -38,11 +98,20 @@ void redirigir_archivo(char *archivo, int tipo) {
 
 void ejecutar_comandos(tline *line) {
     int status;
+	int bg = 0;
+
+	// Verificar si el último comando es en segundo plano
+    if (line->commands[line->ncommands - 1].argv[0] != NULL && 
+        strcmp(line->commands[line->ncommands - 1].argv[0], "&") == 0) {
+        bg = 1;
+        line->commands[line->ncommands - 1].argv[0] = NULL;  // Eliminar el "&" de los argumentos
+    }
+
+
     if (line->ncommands == 1) {
         pid_t pid = fork();
         if (pid == 0) {
             // Redirección de entrada, salida y error si están especificados
-
             if (line->redirect_input) redirigir_archivo(line->redirect_input, STDIN_FILENO);
             if (line->redirect_output) redirigir_archivo(line->redirect_output, STDOUT_FILENO);
             if (line->redirect_error) redirigir_archivo(line->redirect_error, STDERR_FILENO);
@@ -56,11 +125,21 @@ void ejecutar_comandos(tline *line) {
                         line->commands[0].argv[0], strerror(errno));
                 exit(1);
             }
-        } else {
-            wait(&status);
-            if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
-                printf("El comando no se ejecutó correctamente\n");
-        }
+     	else {
+			if (bg) {
+				jobs[numJobs].pid = pid;
+				jobs[numJobs].nombre = line->commands[0].argv[0];
+				jobs[numJobs].estado = 1;
+				numJobs++;
+                printf("Proceso en segundo plano con PID %d\n", pid);
+			} else {
+				waitpid(pid, &status, 0);
+				if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
+					printf("El comando no se ejecutó correctamente\n");
+			}
+		}
+    }
+	
     } else {
         int num_pipes = line->ncommands - 1;
         int fd[num_pipes][2];
@@ -87,11 +166,16 @@ void ejecutar_comandos(tline *line) {
                 exit(1);
             }
         }
+		// Cerramos los pipes en el proceso principal
         for (int i = 0; i < num_pipes; i++) {
             close(fd[i][READ_END]);
             close(fd[i][WRITE_END]);
         }
-        for (int i = 0; i < line->ncommands; i++) wait(&status);
+		if (!bg){
+			for (int i = 0; i < num_pipes; i++) {
+				wait(&status);
+			}
+		}
     }
 }
 
@@ -105,8 +189,14 @@ int main (void)
 		if (line==NULL) {
 			continue;
 		}
-		if (line!=NULL){
-		ejecutar_comandos(line);
+		if(line->ncommands == 1 && strcmp(line->commands[0].argv[0], "cd") == 0) {
+			cd_comando(line->commands[0].argv[1]);
+        } else if(line->ncommands == 1 && strcmp(line->commands[0].argv[0], "jobs") == 0) {
+			jobs_comando();
+		} else if(line->ncommands == 1 && strcmp(line->commands[0].argv[0], "fg") == 0) {
+            fg_comando(atoi(line->commands[0].argv[1]));
+        } else {
+			ejecutar_comandos(line);
 		}
 		printf("msh> ");	
 	}
