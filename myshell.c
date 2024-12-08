@@ -44,9 +44,41 @@ void jobs_comando() {
 		printf("No hay trabajos en segundo plano\n");
 		return;
 	}
-	for (int i = 0; i < numJobs; i++) {
-        printf("[%d] %d %s %s\n", i + 1, jobs[i].pid, (jobs[i].estado == 2 ? "terminado" : "ejecutando"), jobs[i].nombre);	
-	}
+	    for (int i = 0; i < numJobs; i++) {
+        pid_t result = waitpid(jobs[i].pid, NULL, WNOHANG | WUNTRACED);
+        if (result == 0) {
+            // El proceso sigue ejecutándose
+            jobs[i].estado = 1; // Ejecutando
+        } else {
+            // El proceso ha terminado
+            if (WIFEXITED(result) || WIFSIGNALED(result)) {
+                jobs[i].estado = 2; // Terminado
+            } else if (WIFSTOPPED(result)) {
+                jobs[i].estado = 3; // Detenido
+            }
+        }
+    }
+	// Imprimir y limpiar trabajos
+    int i = 0;
+    while (i < numJobs) {
+        printf("[%d] %d %s %s\n", i + 1, jobs[i].pid,
+               (jobs[i].estado == 1 ? "ejecutando" :
+                (jobs[i].estado == 2 ? "terminado" : "detenido")),
+               jobs[i].nombre);
+
+        // Eliminar trabajos terminados
+        if (jobs[i].estado == 2) { // Si está terminado
+            free(jobs[i].nombre);  // Liberar memoria
+            for (int j = i; j < numJobs - 1; j++) {
+                jobs[j] = jobs[j + 1]; // Desplazar trabajos
+            }
+            numJobs--; // Reducir número de trabajos
+            // No incrementar `i` porque ya hemos desplazado
+        } else {
+            i++; // Incrementar solo si no se eliminó el trabajo
+        }
+    }
+    
 }
 
 //funcion fg
@@ -66,6 +98,7 @@ void fg_comando(int job) {
     // Eliminar el trabajo de la lista
 	for (int i = job - 1; i < numJobs - 1; i++) {
 		jobs[i] = jobs[i + 1];
+
 	}
 	numJobs--;
 }
@@ -98,19 +131,13 @@ void redirigir_archivo(char *archivo, int tipo) {
 
 void ejecutar_comandos(tline *line) {
     int status;
-	int bg = 0;
-
-	// Verificar si el último comando es en segundo plano
-    if (line->commands[line->ncommands - 1].argv[0] != NULL && 
-        strcmp(line->commands[line->ncommands - 1].argv[0], "&") == 0) {
-        bg = 1;
-        line->commands[line->ncommands - 1].argv[0] = NULL;  // Eliminar el "&" de los argumentos
-    }
+	int bg = line->background;
 
 
     if (line->ncommands == 1) {
         pid_t pid = fork();
         if (pid == 0) {
+		
             // Redirección de entrada, salida y error si están especificados
             if (line->redirect_input) redirigir_archivo(line->redirect_input, STDIN_FILENO);
             if (line->redirect_output) redirigir_archivo(line->redirect_output, STDOUT_FILENO);
@@ -125,19 +152,20 @@ void ejecutar_comandos(tline *line) {
                         line->commands[0].argv[0], strerror(errno));
                 exit(1);
             }
-     	else {
+    } else {
 			if (bg) {
 				jobs[numJobs].pid = pid;
-				jobs[numJobs].nombre = line->commands[0].argv[0];
+				jobs[numJobs].nombre = strdup(line->commands[0].argv[0]);
 				jobs[numJobs].estado = 1;
 				numJobs++;
-                printf("Proceso en segundo plano con PID %d\n", pid);
+                		printf("Proceso en segundo plano con PID %d\n", pid);
 			} else {
-				waitpid(pid, &status, 0);
-				if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
+				if(waitpid(pid, &status, 0)==-1){
+					fprintf(stderr, "Error al esperar al proceso: %s\n", strerror(errno));
+				}
+				else if (WIFEXITED(status) && WEXITSTATUS(status) != 0)
 					printf("El comando no se ejecutó correctamente\n");
 			}
-		}
     }
 	
     } else {
@@ -171,11 +199,7 @@ void ejecutar_comandos(tline *line) {
             close(fd[i][READ_END]);
             close(fd[i][WRITE_END]);
         }
-		if (!bg){
-			for (int i = 0; i < num_pipes; i++) {
-				wait(&status);
-			}
-		}
+        for (int i = 0; i < line->ncommands; i++) wait(&status);
     }
 }
 
