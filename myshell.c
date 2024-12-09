@@ -7,6 +7,7 @@
 #include <errno.h>   //Para definir códigos de error para funciones del sistema
 #include <string.h> //Para cadaenas de texto
 #include <fcntl.h> //Para manipular archivos a nivel de sistema: open, O_RDONLY...
+#include <signal.h> //Para manejar señales
 
 #define READ_END 0
 #define WRITE_END 1
@@ -22,8 +23,13 @@ typedef struct {
 tjob jobs[MAX_JOBS];
 int numJobs = 0;
 
-//funcion para cd
+void configurar_signal_shell() {
+    signal(SIGINT, SIG_IGN); // Ignorar SIGINT
+    signal(SIGQUIT, SIG_IGN); // Ignorar SIGQUIT
 
+}
+
+//funcion para cd
 void cd_comando(char *path) {
 	if (path == NULL) {
 		path = getenv("HOME");
@@ -83,12 +89,14 @@ void jobs_comando() {
 
 //funcion fg
 void fg_comando(int job) {
-	if (job < 1 || job > numJobs) {
-		fprintf(stderr, "Error: el trabajo especificado no existe\n");
-		return;
-	}
+	    if(job==0){
+        job = numJobs;
+    }
 	pid_t pid = jobs[job - 1].pid;
-
+	    if (kill(pid, SIGCONT) == -1) {
+        fprintf(stderr, "Error al reanudar el proceso: %s\n", strerror(errno));
+        return;
+    }
 	if(waitpid(pid, NULL, 0) == -1) {
 		fprintf(stderr, "Error al esperar al trabajo en primer plano: %s\n", strerror(errno));
 	} else {
@@ -137,7 +145,9 @@ void ejecutar_comandos(tline *line) {
     if (line->ncommands == 1) {
         pid_t pid = fork();
         if (pid == 0) {
-		
+            // Restauramos el manejo por defecto de las señales en el hijo
+            signal(SIGINT, SIG_DFL);  // Permitir que SIGINT interrumpa el proceso
+            signal(SIGQUIT, SIG_DFL); // Permitir que SIGQUIT interrumpa el proceso
             // Redirección de entrada, salida y error si están especificados
             if (line->redirect_input) redirigir_archivo(line->redirect_input, STDIN_FILENO);
             if (line->redirect_output) redirigir_archivo(line->redirect_output, STDOUT_FILENO);
@@ -207,18 +217,32 @@ int main (void)
 {
 	char buf[1024];
 	tline * line;
+	configurar_signal_shell();
 	printf("msh> ");
 	while(fgets(buf, 1024, stdin)){
+		        // Si la entrada está vacía (es decir, solo se presionó Enter), ignorarla
+        if (buf[0] == '\n') {
+            printf("msh> ");  // Solo volver a mostrar el prompt
+            continue;
+        }
 		line = tokenize(buf);
 		if (line==NULL) {
 			continue;
 		}
+        if(strcmp(line->commands[0].argv[0],"exit")==0){
+            exit(0);
+        }
 		if(line->ncommands == 1 && strcmp(line->commands[0].argv[0], "cd") == 0) {
 			cd_comando(line->commands[0].argv[1]);
         } else if(line->ncommands == 1 && strcmp(line->commands[0].argv[0], "jobs") == 0) {
 			jobs_comando();
 		} else if(line->ncommands == 1 && strcmp(line->commands[0].argv[0], "fg") == 0) {
-            fg_comando(atoi(line->commands[0].argv[1]));
+            if(line->commands[0].argc > 1){
+		    fg_comando(atoi(line->commands[0].argv[1]));
+	    }
+	    else{
+		    fg_comando(0);
+	    }
         } else {
 			ejecutar_comandos(line);
 		}
