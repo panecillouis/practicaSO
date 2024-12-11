@@ -61,11 +61,8 @@ void jobs_comando() {
             jobs[i].estado = 1; // Ejecutando
         } else {
             // El proceso ha terminado: WIFEXITED(ha terminado normalmente), WIFSIGNALED(ha terminado por señal SIGTERM)
-            if (WIFEXITED(result) || WIFSIGNALED(result)) {
+            if (WIFEXITED(result)) {
                 jobs[i].estado = 2; // Terminado
-            // El proceso ha sido detenido SIGTSTOP
-            } else if (WIFSTOPPED(result)) {
-                jobs[i].estado = 3; // Detenido
             }
         }
     }
@@ -210,8 +207,6 @@ void ejecutar_comandos(tline *line) {
     } 
     // Si hay mas de un comando separado por pipes
     else {
-        signal(SIGINT, SIG_DFL);  // Permitir que SIGINT interrumpa el proceso
-        signal(SIGQUIT, SIG_DFL); // Permitir que SIGQUIT interrumpa el proceso
         // Calculamos la cantidad de pipes que es el numero de comandos menos 1
         int num_pipes = line->ncommands - 1;
         // Creamos una matriz de pipes juntando cada 2 comandos adyacentes
@@ -222,7 +217,8 @@ void ejecutar_comandos(tline *line) {
             // Crear un proceso hijo con pid 0
             pid_t pid = fork();
             if (pid == 0) {
-                
+                signal(SIGINT, SIG_DFL);  // Permitir que SIGINT interrumpa el proceso
+                signal(SIGQUIT, SIG_DFL); // Permitir que SIGQUIT interrumpa el proceso
                 //Si es el primer comando y hay un archivo para redirigir la entrada, se redirige
                 if (i == 0 && line->redirect_input) redirigir_archivo(line->redirect_input, STDIN_FILENO);
                 // Si no es el primer comando se redirige la entrada del pipe anterior
