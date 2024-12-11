@@ -210,6 +210,8 @@ void ejecutar_comandos(tline *line) {
     } 
     // Si hay mas de un comando separado por pipes
     else {
+        signal(SIGINT, SIG_DFL);  // Permitir que SIGINT interrumpa el proceso
+        signal(SIGQUIT, SIG_DFL); // Permitir que SIGQUIT interrumpa el proceso
         // Calculamos la cantidad de pipes que es el numero de comandos menos 1
         int num_pipes = line->ncommands - 1;
         // Creamos una matriz de pipes juntando cada 2 comandos adyacentes
@@ -220,8 +222,7 @@ void ejecutar_comandos(tline *line) {
             // Crear un proceso hijo con pid 0
             pid_t pid = fork();
             if (pid == 0) {
-                signal(SIGINT, SIG_DFL);  // Permitir que SIGINT interrumpa el proceso
-                signal(SIGQUIT, SIG_DFL); // Permitir que SIGQUIT interrumpa el proceso
+                
                 //Si es el primer comando y hay un archivo para redirigir la entrada, se redirige
                 if (i == 0 && line->redirect_input) redirigir_archivo(line->redirect_input, STDIN_FILENO);
                 // Si no es el primer comando se redirige la entrada del pipe anterior
@@ -243,14 +244,40 @@ void ejecutar_comandos(tline *line) {
                 printf("Error al ejecutar el comando: %s\n", strerror(errno));
                 exit(1);
             }
+            // Si es el último comando y se ejecuta en segundo plano
+            if (i == line->ncommands - 1 && bg) {
+                // Construir el nombre completo del comando con sus argumentos
+                char fullCommand[1024] = "";
+                for(int k = 0; k < line->ncommands; k++) {
+                    for (int j = 0; j < line->commands[k].argc; j++) {
+                        strcat(fullCommand, line->commands[k].argv[j]);
+                        if (j < line->commands[k].argc - 1) {
+                            strcat(fullCommand, " ");
+                        }
+                        else if (k < line->ncommands - 1) {
+                            strcat(fullCommand, " | ");
+                        }
+                    }
+                }
+                jobs[numJobs].pid = pid;
+                jobs[numJobs].nombre = strdup(fullCommand);
+                jobs[numJobs].estado = 1; // Ejecutando
+                numJobs++;
+                printf("Proceso en segundo plano con PID %d\n", pid);
+            }
+
+            
         }
 		// Cerramos los pipes en el proceso principal
         for (int i = 0; i < num_pipes; i++) {
             close(fd[i][READ_END]);
             close(fd[i][WRITE_END]);
         }
-        // Si no se ejecuta en segundo plano esperamos a que todos los comandos terminen
-        for (int i = 0; i < line->ncommands; i++) wait(&status);
+            // Esperamos a que todos los comandos terminen
+        if (!bg)
+        {
+            for (int i = 0; i < line->ncommands; i++) wait(&status);
+        }   
     }
 }
 
