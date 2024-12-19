@@ -95,7 +95,7 @@ void fg_comando(int job) {
     if(job==0){
         job = numJobs;
     }
-    // Cogemos el pid del ultimo mandato introducido en el jobs
+    // Buscamos el pid de la lista de trabajos
 	pid_t pid = jobs[job - 1].pid;
     // Enviamos una señal para reanudar el proceso
 	if (kill(pid, SIGCONT) == -1) {
@@ -123,7 +123,7 @@ void redirigir_archivo(char *archivo, int tipo) {
 	//En cuanto a los permisos: 
 	//En caso de lectura, se abre el archivo en modo lectura.
 	//En caso de escritura: se abrira el archivo en modo escritura, se creara si no existe, se vacia si ya existe.
-	//0644 es el valor de los permisos que se asignaran al archivo: lectura y escritura para el dueño, lectura para el grupo>
+	//0644 es el valor de los permisos que se asignaran al archivo: lectura y escritura para el dueño y el grupo, solo lectura para los demas.
     int fd;
     // El STDIN_FILENO corresponde a tipo 0, STDOUT_FILENO a tipo 1 y STDERR_FILENO a tipo 2
     if (tipo == STDIN_FILENO) {
@@ -152,9 +152,9 @@ void ejecutar_comandos(tline *line) {
 
     // Si solo se le pasa 1 comando
     if (line->ncommands == 1) {
-        // Crear un proceso hijo con pid 0
+        // Crear un proceso hijo
         pid_t pid = fork();
-        // Si el pid es 0, estamos en el proceso hijo
+        // Si es el proceso hijo
         if (pid == 0) {
             // Restauramos el manejo por defecto de las señales en el hijo
             signal(SIGINT, SIG_DFL);  // Permitir que SIGINT interrumpa el proceso
@@ -174,7 +174,7 @@ void ejecutar_comandos(tline *line) {
                         line->commands[0].argv[0], strerror(errno));
                 exit(1);
             }
-        // En caso de que no sea un proceso hijo sino que sea el padre
+        // Si es el proceso padre
         } else {
 			if (bg) {
                 // Construir el nombre completo del comando con sus argumentos
@@ -285,7 +285,7 @@ int main (void)
 	tline * line;
     // Configuramos las señales, para que no se nos cierre la minishell al mandar cualquier señal de control
 	configurar_signal_shell();
-    // Imprimir el nombre de la shell
+    // Imprimimos el prompt
 	printf("msh> ");
     // Leemos la linea de comandos
 	while(fgets(buf, 1024, stdin)){
